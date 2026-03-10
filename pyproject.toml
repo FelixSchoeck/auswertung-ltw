@@ -1,0 +1,14 @@
+[project]
+name = "auswertung-ltw"
+version = "0.1.0"
+description = "Interaktives Dashboard zur Auswertung der Landtagswahl 2026 in Stuttgart Ost"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "geopandas>=1.1.2",
+    "pandas>=2.2,<3",
+    "plotly>=6.6.0",
+    "pyogrio>=0.12.1",
+    "streamlit>=1.42",
+    "altair<6",
+]
