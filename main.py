@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import json
 from pathlib import Path
 
@@ -12,7 +11,6 @@ import streamlit as st
 
 BASE_DIR = Path(__file__).resolve().parent
 RESULTS_PATH = BASE_DIR / "ltw26-ergebnisse.csv"
-REFERENCE_PATH = BASE_DIR / "Ergebnistabelle.csv"
 GEOMETRY_PATH = BASE_DIR / "wahlbezirke.gpkg"
 OST_LAYER_NAME = "03_Ost"
 TARGET_AGS = "08111000"
@@ -113,9 +111,9 @@ BASE_MAP_METRICS = {
 		"label": "Wahlbeteiligung in %",
 		"scale": "Blues",
 	},
-	"Direktkandidaten-Bonus": {
-		"column": "direktkandidaten_bonus_pp",
-		"label": "Gruene Erststimme minus Zweitstimme in Prozentpunkten",
+	"Cem-Bonus": {
+		"column": "cem_bonus_pp",
+		"label": "Gruene Zweitstimme minus Erststimme in Prozentpunkten",
 		"scale": "RdYlGn",
 	},
 	"Ausschoepfungsgrad Gruene": {
@@ -320,32 +318,6 @@ def load_results() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def load_reference_changes() -> pd.DataFrame:
-	rows: list[dict[str, str]] = []
-	with REFERENCE_PATH.open(encoding="utf-8-sig", newline="") as handle:
-		reader = csv.reader(handle)
-		for row in reader:
-			if len(row) < 8:
-				continue
-			key = row[0].strip()
-			if not key:
-				continue
-			rows.append(
-				{
-					"merkmal": key,
-					"direktkandidat": row[1].strip(),
-					"erststimmen": row[2].strip(),
-					"erst_anteil": row[3].strip(),
-					"erst_delta": row[4].strip(),
-					"zweitstimmen": row[5].strip(),
-					"zweit_anteil": row[6].strip(),
-					"zweit_delta": row[7].strip(),
-				}
-			)
-	return pd.DataFrame(rows)
-
-
-@st.cache_data(show_spinner=False)
 def load_geometry_catalog() -> tuple[gpd.GeoDataFrame, str]:
 	layers = gpd.list_layers(GEOMETRY_PATH)
 	layer_names = layers["name"].tolist()
@@ -426,7 +398,7 @@ def enrich_metrics(frame: pd.DataFrame) -> pd.DataFrame:
 	enriched["gruene_zu_cdu_erst_pp"] = enriched["gruene_erst_pct"] - enriched["cdu_erst_pct"]
 	enriched["gruene_zu_cdu_zweit_pp"] = enriched["gruene_zweit_pct"] - enriched["cdu_zweit_pct"]
 	enriched["split_ticket_pp"] = enriched["gruene_zweit_pct"] - enriched["gruene_erst_pct"]
-	enriched["direktkandidaten_bonus_pp"] = enriched["gruene_erst_pct"] - enriched["gruene_zweit_pct"]
+	enriched["cem_bonus_pp"] = enriched["gruene_zweit_pct"] - enriched["gruene_erst_pct"]
 	enriched["gruene_ausschoepfung_pct"] = percentage(enriched["F1"], enriched["Wahlberechtigte gesamt (A)"])
 	enriched = add_rank_columns(enriched, "erst", FIRST_VOTE_PARTIES, "Erststimmen gueltige (D)")
 	enriched = add_rank_columns(enriched, "zweit", SECOND_VOTE_PARTIES, "Zweitstimmen gueltige (F)")
@@ -511,7 +483,7 @@ def summarize_frame(frame: pd.DataFrame) -> pd.Series:
 	summary["cdu_zweit_pct"] = 100 * summary["F2"] / summary["Zweitstimmen gueltige (F)"] if summary["Zweitstimmen gueltige (F)"] else 0
 	summary["wahlbeteiligung_pct"] = 100 * summary["Waehler gesamt (B)"] / summary["Wahlberechtigte gesamt (A)"] if summary["Wahlberechtigte gesamt (A)"] else 0
 	summary["split_ticket_pp"] = summary["gruene_zweit_pct"] - summary["gruene_erst_pct"]
-	summary["direktkandidaten_bonus_pp"] = summary["gruene_erst_pct"] - summary["gruene_zweit_pct"]
+	summary["cem_bonus_pp"] = summary["gruene_zweit_pct"] - summary["gruene_erst_pct"]
 	summary["gruene_ausschoepfung_pct"] = 100 * summary["F1"] / summary["Wahlberechtigte gesamt (A)"] if summary["Wahlberechtigte gesamt (A)"] else 0
 	summary["gruene_zu_cdu_erst_pp"] = summary["gruene_erst_pct"] - summary["cdu_erst_pct"]
 	summary["gruene_zu_cdu_zweit_pp"] = summary["gruene_zweit_pct"] - summary["cdu_zweit_pct"]
@@ -534,7 +506,7 @@ def build_map(frame: gpd.GeoDataFrame, metric_name: str, map_metrics: dict[str, 
 		metric_config["column"]: metric_config["label"],
 	}
 	for column in [
-		"direktkandidaten_bonus_pp",
+		"cem_bonus_pp",
 		"mobilisierungsluecke_gruene_stimmen",
 		"gruene_briefwahl_effekt_zweit_pp",
 		"gruene_briefwahl_effekt_erst_pp",
@@ -654,7 +626,7 @@ def add_mobilization_gap(frame: pd.DataFrame) -> pd.DataFrame:
 
 def ensure_strategy_columns(frame: pd.DataFrame) -> pd.DataFrame:
 	required_columns = {
-		"direktkandidaten_bonus_pp",
+		"cem_bonus_pp",
 		"hauptgegner_zweit_label",
 		"gruene_zu_hauptgegner_zweit_pp",
 		"gruene_erst_rang",
@@ -735,18 +707,18 @@ def build_rank_heatmap(frame: pd.DataFrame) -> px.imshow:
 	return fig
 
 
-def build_direct_bonus_chart(frame: pd.DataFrame) -> px.bar:
-	ranking = frame[["bezirk_label", "bezirk_name", "direktkandidaten_bonus_pp"]].copy()
-	ranking = ranking.sort_values("direktkandidaten_bonus_pp", ascending=False)
+def build_cem_bonus_chart(frame: pd.DataFrame) -> px.bar:
+	ranking = frame[["bezirk_label", "bezirk_name", "cem_bonus_pp"]].copy()
+	ranking = ranking.sort_values("cem_bonus_pp", ascending=False)
 	ranking["label"] = ranking["bezirk_label"] + " | " + ranking["bezirk_name"]
 	fig = px.bar(
 		ranking,
-		x="direktkandidaten_bonus_pp",
+		x="cem_bonus_pp",
 		y="label",
 		orientation="h",
-		color="direktkandidaten_bonus_pp",
+		color="cem_bonus_pp",
 		color_continuous_scale="RdYlGn",
-		labels={"direktkandidaten_bonus_pp": "Direktkandidaten-Bonus in PP", "label": "Bezirk"},
+		labels={"cem_bonus_pp": "Cem-Bonus in PP", "label": "Bezirk"},
 	)
 	fig.update_layout(margin={"r": 0, "t": 20, "l": 0, "b": 0}, yaxis_title="")
 	return fig
@@ -769,45 +741,26 @@ def build_mobilization_chart(frame: pd.DataFrame) -> px.bar:
 
 
 def build_brief_effect_chart(effects: pd.DataFrame) -> px.bar:
+	chart_data = effects.copy()
+	chart_data["bezirk_label"] = chart_data["bezirk_name"].fillna(chart_data["base_key"])
+	duplicate_names = chart_data["bezirk_label"].duplicated(keep=False)
+	chart_data.loc[duplicate_names, "bezirk_label"] = (
+		chart_data.loc[duplicate_names, "bezirk_label"]
+		+ " ("
+		+ chart_data.loc[duplicate_names, "base_key"].astype(str)
+		+ ")"
+	)
 	fig = px.bar(
-		effects.sort_values("gruene_briefwahl_effekt_zweit_pp"),
+		chart_data.sort_values("gruene_briefwahl_effekt_zweit_pp"),
 		x="gruene_briefwahl_effekt_zweit_pp",
-		y="base_key",
+		y="bezirk_label",
 		orientation="h",
 		color="gruene_briefwahl_effekt_zweit_pp",
 		color_continuous_scale="RdYlGn",
-		labels={"gruene_briefwahl_effekt_zweit_pp": "Briefwahl-Effekt Gruene Zweit PP", "base_key": "Bezirk"},
+		hover_data={"base_key": True},
+		labels={"gruene_briefwahl_effekt_zweit_pp": "Briefwahl-Effekt Gruene Zweit PP", "bezirk_label": "Bezirk"},
 	)
 	fig.update_layout(margin={"r": 0, "t": 20, "l": 0, "b": 0})
-	return fig
-
-
-def build_reference_delta_chart(reference: pd.DataFrame) -> px.bar:
-	subset = reference[reference["merkmal"].isin(["GRÜNE", "CDU", "SPD", "AfD", "Die Linke", "FDP", "Volt", "BSW"])].copy()
-	subset["erst_delta_num"] = pd.to_numeric(subset["erst_delta"].str.replace(",", "."), errors="coerce")
-	subset["zweit_delta_num"] = pd.to_numeric(subset["zweit_delta"].str.replace(",", "."), errors="coerce")
-
-	melted = subset.melt(
-		id_vars=["merkmal"],
-		value_vars=["erst_delta_num", "zweit_delta_num"],
-		var_name="Stimmart",
-		value_name="Delta",
-	).dropna()
-	melted["Stimmart"] = melted["Stimmart"].map(
-		{
-			"erst_delta_num": "Erststimme",
-			"zweit_delta_num": "Zweitstimme",
-		}
-	)
-	fig = px.bar(
-		melted,
-		x="merkmal",
-		y="Delta",
-		color="Stimmart",
-		barmode="group",
-		color_discrete_sequence=["#2166ac", "#1a9850"],
-	)
-	fig.update_layout(margin={"r": 0, "t": 20, "l": 0, "b": 0}, yaxis_title="Gewinn / Verlust in PP")
 	return fig
 
 
@@ -843,7 +796,7 @@ def render_overview(frame: gpd.GeoDataFrame, summary: pd.Series, compare_party: 
 	row2 = st.columns(4)
 	row2[0].metric("Gruene Erststimmenanteil", format_pct(summary["gruene_erst_pct"]))
 	row2[1].metric("Gruene Zweitstimmenanteil", format_pct(summary["gruene_zweit_pct"]))
-	row2[2].metric("Direktkandidaten-Bonus", format_pp(summary["direktkandidaten_bonus_pp"]))
+	row2[2].metric("Cem-Bonus", format_pp(summary["cem_bonus_pp"]))
 	row2[3].metric("Ausschoepfungsgrad Gruene", format_pct(summary["gruene_ausschoepfung_pct"]))
 
 	row3 = st.columns(4)
@@ -881,7 +834,7 @@ def render_map_tab(frame: gpd.GeoDataFrame, analysis_frames: dict[str, gpd.GeoDa
 		"gruene_erst_pct",
 		"gruene_zweit_pct",
 		"wahlbeteiligung_pct",
-		"direktkandidaten_bonus_pp",
+		"cem_bonus_pp",
 		compare_zweit_column,
 	]
 	for column in ["mobilisierungsluecke_gruene_stimmen", "gruene_briefwahl_effekt_zweit_pp", "gruene_briefwahl_effekt_erst_pp"]:
@@ -895,7 +848,7 @@ def render_map_tab(frame: gpd.GeoDataFrame, analysis_frames: dict[str, gpd.GeoDa
 			"gruene_erst_pct": "Gruene Erst %",
 			"gruene_zweit_pct": "Gruene Zweit %",
 			"wahlbeteiligung_pct": "Wahlbeteiligung %",
-			"direktkandidaten_bonus_pp": "Direktkandidaten-Bonus PP",
+			"cem_bonus_pp": "Cem-Bonus PP",
 			compare_zweit_column: f"Gruene minus {compare_label} Zweit PP",
 			"mobilisierungsluecke_gruene_stimmen": "Mobilisierungsluecke Stimmen",
 			"gruene_briefwahl_effekt_zweit_pp": "Briefwahl-Effekt Zweit PP",
@@ -926,50 +879,43 @@ def render_strategy_tab(frame: gpd.GeoDataFrame, analysis_frames: dict[str, gpd.
 		on="base_key",
 		how="left",
 	)
-	avg_direct_bonus = strategy_frame["direktkandidaten_bonus_pp"].mean()
+	avg_cem_bonus = strategy_frame["cem_bonus_pp"].mean()
 	mobilisierung_summe = strategy_frame["mobilisierungsluecke_gruene_stimmen"].sum()
 	avg_brief_effekt = brief_effects["gruene_briefwahl_effekt_zweit_pp"].mean() if not brief_effects.empty else 0.0
 	positive_brief = int((brief_effects["gruene_briefwahl_effekt_zweit_pp"] > 0).sum()) if not brief_effects.empty else 0
-	positive_direct_bonus = int((strategy_frame["direktkandidaten_bonus_pp"] > 0).sum())
+	positive_cem_bonus = int((strategy_frame["cem_bonus_pp"] > 0).sum())
 	top5_share = 100 * strategy_frame.nlargest(5, "F1")["F1"].sum() / strategy_frame["F1"].sum() if strategy_frame["F1"].sum() else 0
 
 	row = st.columns(5)
-	row[0].metric("Direktkandidaten-Bonus", format_pp(avg_direct_bonus))
+	row[0].metric("Cem-Bonus", format_pp(avg_cem_bonus))
 	row[1].metric("Briefwahl-Effekt Zweit", format_pp(avg_brief_effekt))
 	row[2].metric("Positive Briefwahl-Bezirke", str(positive_brief))
-	row[3].metric("Direkt-Bonus-Bezirke", str(positive_direct_bonus))
+	row[3].metric("Cem-Bonus-Bezirke", str(positive_cem_bonus))
 	row[4].metric("Mobilisierungsluecke", format_int(mobilisierung_summe))
 	st.caption(f"Top-5-Konzentration der Gruene-Zweitstimmen: {format_pct(top5_share)}")
+	st.info(
+		"Mobilisierungsluecke: Geschaetztes zusaetzliches Gruene-Stimmenpotenzial in Bezirken mit unterdurchschnittlicher "
+		"Wahlbeteiligung. Berechnung je Bezirk: max(Ost-Durchschnitt Beteiligung - Bezirks-Beteiligung, 0) x "
+		"Wahlberechtigte x Gruene-Zweitstimmenanteil. In der Briefwahl ist der Wert nur eingeschraenkt belastbar."
+	)
 
 	left, right = st.columns(2)
-	left.plotly_chart(build_direct_bonus_chart(strategy_frame), use_container_width=True)
+	left.plotly_chart(build_cem_bonus_chart(strategy_frame), use_container_width=True)
 	if selected_view == "Briefwahl":
 		right.info("Mobilisierungsluecke ist fuer reine Briefwahl nicht belastbar, weil in den Briefwahlzeilen keine Wahlberechtigten hinterlegt sind.")
 	else:
 		right.plotly_chart(build_mobilization_chart(strategy_frame), use_container_width=True)
 
-	left2, right2 = st.columns(2)
-	left2.dataframe(
-		strategy_frame[["bezirk_label", "bezirk_name", "direktkandidaten_bonus_pp"]]
-		.rename(
-			columns={
-				"bezirk_label": "Bezirk",
-				"bezirk_name": "Name",
-				"direktkandidaten_bonus_pp": "Direktkandidaten-Bonus PP",
-			}
-		)
-		.sort_values("Direktkandidaten-Bonus PP", ascending=False),
-		use_container_width=True,
-	)
+	spacer_left, chart_col, spacer_right = st.columns([1, 6, 1])
 	if selected_view == "Gesamtbezirk":
-		right2.plotly_chart(build_brief_effect_chart(brief_effects), use_container_width=True)
+		chart_col.plotly_chart(build_brief_effect_chart(brief_effects), use_container_width=True)
 	else:
-		right2.info("Briefwahl-Effekt wird auf Gesamtbezirksebene aus Urnen- und Briefwahldaten berechnet.")
+		chart_col.info("Briefwahl-Effekt wird auf Gesamtbezirksebene aus Urnen- und Briefwahldaten berechnet.")
 
 	strategy_table = strategy_frame[[
 		"bezirk_label",
 		"bezirk_name",
-		"direktkandidaten_bonus_pp",
+		"cem_bonus_pp",
 		"gruene_briefwahl_effekt_zweit_pp",
 		"gruene_briefwahl_effekt_erst_pp",
 		"mobilisierungsluecke_gruene_stimmen",
@@ -978,13 +924,13 @@ def render_strategy_tab(frame: gpd.GeoDataFrame, analysis_frames: dict[str, gpd.
 		columns={
 			"bezirk_label": "Bezirk",
 			"bezirk_name": "Name",
-			"direktkandidaten_bonus_pp": "Direktkandidaten-Bonus PP",
+			"cem_bonus_pp": "Cem-Bonus PP",
 			"gruene_briefwahl_effekt_zweit_pp": "Briefwahl-Effekt Zweit PP",
 			"gruene_briefwahl_effekt_erst_pp": "Briefwahl-Effekt Erst PP",
 			"mobilisierungsluecke_gruene_stimmen": "Mobilisierungsluecke Stimmen",
 		}
 	)
-	st.dataframe(strategy_table.sort_values("Direktkandidaten-Bonus PP", ascending=False), use_container_width=True)
+	st.dataframe(strategy_table.sort_values("Cem-Bonus PP", ascending=False), use_container_width=True)
 
 
 def render_competition_tab(summary: pd.Series, compare_party: str) -> None:
@@ -1046,15 +992,6 @@ def render_competition_tab(summary: pd.Series, compare_party: str) -> None:
 	st.plotly_chart(gap_fig, use_container_width=True)
 
 
-def render_trends_tab(reference: pd.DataFrame) -> None:
-	st.info(
-		"Im Repository liegen noch keine historischen Stuttgart-Ost-Bezirksdaten fuer 2021 oder 2016. "
-		"Bis dahin zeigt dieser Bereich die aggregierten Gewinn-/Verlustwerte aus der aktuell vorhandenen Referenzdatei fuer den Wahlkreis 04 - Stuttgart IV und damit nur einen Teil des erweiterten Ost-Scopes."
-	)
-	st.plotly_chart(build_reference_delta_chart(reference), use_container_width=True)
-	st.dataframe(reference, use_container_width=True)
-
-
 def render_data_tab(frame: gpd.GeoDataFrame) -> None:
 	data_frame = ensure_strategy_columns(frame)
 	data_frame = data_frame[[
@@ -1068,7 +1005,7 @@ def render_data_tab(frame: gpd.GeoDataFrame) -> None:
 		"gruene_erst_pct",
 		"gruene_zweit_pct",
 		"gruene_zu_cdu_zweit_pp",
-		"direktkandidaten_bonus_pp",
+		"cem_bonus_pp",
 	]].copy()
 	st.dataframe(data_frame.sort_values("bezirk_label"), use_container_width=True)
 	st.download_button(
@@ -1083,7 +1020,6 @@ def main() -> None:
 	analysis_frames, matched, unmapped = build_analysis_frames()
 	scope_results = load_results()
 	geometry_catalog, layer_name = load_geometry_catalog()
-	reference = load_reference_changes()
 
 	render_header(layer_name, len(matched), len(unmapped))
 
@@ -1119,8 +1055,8 @@ def main() -> None:
 	if selected_view == "Gesamtbezirk":
 		st.caption("Hinweis: Werte in dieser Ansicht sind pro Bezirk als Urnen- und Briefwahlergebnis zusammengefasst.")
 
-	overview_tab, strategy_tab, map_tab, bezirke_tab, competition_tab, trends_tab, data_tab = st.tabs(
-		["Uebersicht", "Strategie-KPIs", "Karte", "Bezirke", "Parteienvergleich", "Trends", "Daten"]
+	overview_tab, strategy_tab, map_tab, bezirke_tab, competition_tab, data_tab = st.tabs(
+		["Uebersicht", "Strategie-KPIs", "Karte", "Bezirke", "Parteienvergleich", "Daten"]
 	)
 
 	with overview_tab:
@@ -1133,8 +1069,6 @@ def main() -> None:
 		render_bezirke_tab(frame)
 	with competition_tab:
 		render_competition_tab(summary, compare_party)
-	with trends_tab:
-		render_trends_tab(reference)
 	with data_tab:
 		render_data_tab(frame)
 
